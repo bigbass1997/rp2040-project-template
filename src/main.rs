@@ -20,10 +20,30 @@ use bsp::hal::{
     pac,
     sio::Sio,
     watchdog::Watchdog,
+    gpio::{Pin, PushPullOutput, bank0::Gpio25},
 };
+use cortex_m::delay::Delay;
+
+unsafe fn relocate_ram_code() {
+    extern "C" {
+        static __ram_code_dest_start: u32;
+        static __ram_code_dest_end: u32;
+        static __ram_code_src_start: u32;
+    }
+    
+    let ptr_dest_start = &__ram_code_dest_start as *const u32;
+    let ptr_dest_end = &__ram_code_dest_end as *const u32;
+    let ptr_src_start = &__ram_code_src_start as *const u32;
+    
+    let length = (ptr_dest_end as u32) - (ptr_dest_start as u32);
+    
+    bsp::hal::rom_data::memcpy44(ptr_dest_start as *mut u32, ptr_src_start, length);
+}
 
 #[entry]
 fn main() -> ! {
+    unsafe { relocate_ram_code(); }
+    
     info!("Program start");
     let mut pac = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
@@ -44,7 +64,7 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    let delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
     let pins = bsp::Pins::new(
         pac.IO_BANK0,
@@ -58,8 +78,14 @@ fn main() -> ! {
     // Notably, on the Pico W, the LED is not connected to any of the RP2040 GPIOs but to the cyw43 module instead. If you have
     // a Pico W and want to toggle a LED with a simple GPIO output pin, you can connect an external
     // LED to one of the GPIO pins, and reference that pin here.
-    let mut led_pin = pins.led.into_push_pull_output();
+    let led_pin = pins.led.into_push_pull_output();
 
+    foobar(delay, led_pin);
+}
+
+#[link_section = ".ram_code"]
+fn foobar(mut delay: Delay, mut led_pin: Pin<Gpio25, PushPullOutput>) -> ! {
+    info!("Executing from {:#010X}", foobar as *const u32 as u32);
     loop {
         info!("on!");
         led_pin.set_high().unwrap();
